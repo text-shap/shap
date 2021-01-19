@@ -1,7 +1,11 @@
 from .. import maskers
 from .. import links
 from ..utils import safe_isinstance, show_progress
-from ..utils.transformers import MODELS_FOR_CAUSAL_LM, MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM
+from ..utils.transformers import (
+    MODELS_FOR_CAUSAL_LM,
+    MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM,
+    MODELS_FOR_SEQ_CLASSIFICATION,
+)
 from .. import models
 from ..models import Model
 from .._explanation import Explanation
@@ -12,17 +16,26 @@ import pickle
 from .. import explainers
 
 
-class Explainer():
-    """ Uses Shapley values to explain any machine learning model or python function.
+class Explainer:
+    """Uses Shapley values to explain any machine learning model or python function.
 
     This is the primary explainer interface for the SHAP library. It takes any combination
     of a model and masker and returns a callable subclass object that implements
     the particular estimation algorithm that was chosen.
     """
 
-    def __init__(self, model, masker=None, link=links.identity, algorithm="auto", output_names=None, feature_names=None, **kwargs):
-        """ Build a new explainer for the passed model.
-        
+    def __init__(
+        self,
+        model,
+        masker=None,
+        link=links.identity,
+        algorithm="auto",
+        output_names=None,
+        feature_names=None,
+        **kwargs
+    ):
+        """Build a new explainer for the passed model.
+
         Parameters
         ----------
         model : object or function
@@ -30,7 +43,7 @@ class Explainer():
             computes the output of the model for those samples.
 
         masker : function, numpy.array, pandas.DataFrame, tokenizer, None, or a list of these for each model input
-            The function used to "mask" out hidden features of the form `masked_args = masker(*model_args, mask=mask)`. 
+            The function used to "mask" out hidden features of the form `masked_args = masker(*model_args, mask=mask)`.
             It takes input in the same form as the model, but for just a single sample with a binary
             mask, then returns an iterable of masked samples. These
             masked samples will then be evaluated using the model function and the outputs averaged.
@@ -42,7 +55,7 @@ class Explainer():
             shap.TabularMasker(data, hclustering="correlation") will enforce a hierarchial clustering
             of coalitions for the game (in this special case the attributions are known as the Owen values).
 
-        link : function 
+        link : function
             The link function used to map between the output units of the model and the SHAP value units. By
             default it is shap.links.identity, but shap.links.logit can be useful so that expectations are
             computed in probability units while explanations remain in the (more naturally additive) log-odds
@@ -52,7 +65,7 @@ class Explainer():
         algorithm : "auto", "permutation", "partition", "tree", "kernel", "sampling", "linear", "deep", or "gradient"
             The algorithm used to estimate the Shapley values. There are many different algorithms that
             can be used to estimate the Shapley values (and the related value for constrained games), each
-            of these algorithms have various tradeoffs and are preferrable in different situations. By 
+            of these algorithms have various tradeoffs and are preferrable in different situations. By
             default the "auto" options attempts to make the best choice given the passed model and masker,
             but this choice can always be overriden by passing the name of a specific algorithm. The type of
             algorithm used will determine what type of subclass object is returned by this constructor, and
@@ -69,17 +82,33 @@ class Explainer():
         self.model = model
         self.output_names = output_names
         self.feature_names = feature_names
-        
+
         # wrap the incoming masker object as a shap.Masker object
-        if safe_isinstance(masker, "pandas.core.frame.DataFrame") or ((safe_isinstance(masker, "numpy.ndarray") or sp.sparse.issparse(masker)) and len(masker.shape) == 2):
+        if safe_isinstance(masker, "pandas.core.frame.DataFrame") or (
+            (safe_isinstance(masker, "numpy.ndarray") or sp.sparse.issparse(masker))
+            and len(masker.shape) == 2
+        ):
             if algorithm == "partition":
                 self.masker = maskers.Partition(masker)
             else:
                 self.masker = maskers.Independent(masker)
-        elif safe_isinstance(masker, ["transformers.PreTrainedTokenizer", "transformers.tokenization_utils_base.PreTrainedTokenizerBase"]):
-            if (safe_isinstance(self.model, "transformers.PreTrainedModel") or safe_isinstance(self.model, "transformers.TFPreTrainedModel")) and safe_isinstance(self.model, MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM + MODELS_FOR_CAUSAL_LM):
+        elif safe_isinstance(
+            masker,
+            [
+                "transformers.PreTrainedTokenizer",
+                "transformers.tokenization_utils_base.PreTrainedTokenizerBase",
+            ],
+        ):
+            if (
+                safe_isinstance(self.model, "transformers.PreTrainedModel")
+                or safe_isinstance(self.model, "transformers.TFPreTrainedModel")
+            ) and safe_isinstance(
+                self.model, MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM + MODELS_FOR_CAUSAL_LM
+            ):
                 # auto assign text infilling if model is a transformer model with lm head
-                self.masker = maskers.Text(masker, mask_token="...", collapse_mask_token=True)
+                self.masker = maskers.Text(
+                    masker, mask_token="...", collapse_mask_token=True
+                )
             else:
                 self.masker = maskers.Text(masker)
         elif (masker is list or masker is tuple) and masker[0] is not str:
@@ -88,21 +117,31 @@ class Explainer():
             self.masker = maskers.Independent(masker)
         else:
             self.masker = masker
-        
+
         # wrap self.masker and self.model for output text explanation algorithm
-        if (safe_isinstance(self.model, "transformers.PreTrainedModel") or safe_isinstance(self.model, "transformers.TFPreTrainedModel"))and safe_isinstance(self.model, MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM + MODELS_FOR_CAUSAL_LM):
+        if (
+            safe_isinstance(self.model, "transformers.PreTrainedModel")
+            or safe_isinstance(self.model, "transformers.TFPreTrainedModel")
+        ) and safe_isinstance(
+            self.model, MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM + MODELS_FOR_CAUSAL_LM
+        ):
             self.model = models.TeacherForcingLogits(self.model, self.masker.tokenizer)
             self.masker = maskers.FixedComposite(self.masker)
-        elif (safe_isinstance(self.model, "shap.models.TeacherForcingLogits") or safe_isinstance(self.model, "shap.models.GenerateTopKLM")) and safe_isinstance(self.masker, ["shap.maskers.Text", "shap.maskers.Image"]):
+        elif (
+            safe_isinstance(self.model, "shap.models.TeacherForcingLogits")
+            or safe_isinstance(self.model, "shap.models.GenerateTopKLM")
+        ) and safe_isinstance(self.masker, ["shap.maskers.Text", "shap.maskers.Image"]):
             self.masker = maskers.FixedComposite(self.masker)
 
-        #self._brute_force_fallback = explainers.BruteForce(self.model, self.masker)
+        # self._brute_force_fallback = explainers.BruteForce(self.model, self.masker)
 
         # validate and save the link function
         if callable(link) and callable(getattr(link, "inverse", None)):
             self.link = link
         else:
-            raise Exception("The passed link function needs to be callable and have a callable .inverse property!")
+            raise Exception(
+                "The passed link function needs to be callable and have a callable .inverse property!"
+            )
 
         # if we are called directly (as opposed to through super()) then we convert ourselves to the subclass
         # that implements the specific algorithm that was chosen
@@ -110,12 +149,15 @@ class Explainer():
 
             # do automatic algorithm selection
             from .. import explainers
+
             if algorithm == "auto":
 
                 # use implementation-aware methods if possible
                 if explainers.Linear.supports_model_with_masker(model, self.masker):
                     algorithm = "linear"
-                elif explainers.Tree.supports_model_with_masker(model, self.masker): # TODO: check for Partition?
+                elif explainers.Tree.supports_model_with_masker(
+                    model, self.masker
+                ):  # TODO: check for Partition?
                     algorithm = "tree"
                 elif explainers.Additive.supports_model_with_masker(model, self.masker):
                     algorithm = "additive"
@@ -136,42 +178,100 @@ class Explainer():
                         if getattr(self.masker, "partition_tree", None) is None:
                             algorithm = "permutation"
                         else:
-                            algorithm = "partition" # TODO: should really only do this if there is more than just tab
-                    elif issubclass(type(self.masker), maskers.Image) or issubclass(type(self.masker), maskers.Text) or issubclass(type(self.masker), maskers.FixedComposite):
+                            algorithm = "partition"  # TODO: should really only do this if there is more than just tab
+                    elif (
+                        issubclass(type(self.masker), maskers.Image)
+                        or issubclass(type(self.masker), maskers.Text)
+                        or issubclass(type(self.masker), maskers.FixedComposite)
+                    ):
                         algorithm = "partition"
                     else:
                         algorithm = "permutation"
-                
+
                 # if we get here then we don't know how to handle what was given to us
                 else:
-                    raise Exception("The passed model is not callable and cannot be analyzed directly with the given masker! Model: " + str(model))
+                    raise Exception(
+                        "The passed model is not callable and cannot be analyzed directly with the given masker! Model: "
+                        + str(model)
+                    )
 
             # build the right subclass
             if algorithm == "exact":
                 self.__class__ = explainers.Exact
-                explainers.Exact.__init__(self, self.model, self.masker, link=self.link, feature_names=self.feature_names, **kwargs)
+                explainers.Exact.__init__(
+                    self,
+                    self.model,
+                    self.masker,
+                    link=self.link,
+                    feature_names=self.feature_names,
+                    **kwargs
+                )
             elif algorithm == "permutation":
                 self.__class__ = explainers.Permutation
-                explainers.Permutation.__init__(self, self.model, self.masker, link=self.link, feature_names=self.feature_names, **kwargs)
+                explainers.Permutation.__init__(
+                    self,
+                    self.model,
+                    self.masker,
+                    link=self.link,
+                    feature_names=self.feature_names,
+                    **kwargs
+                )
             elif algorithm == "partition":
                 self.__class__ = explainers.Partition
-                explainers.Partition.__init__(self, self.model, self.masker, link=self.link, feature_names=self.feature_names, output_names=self.output_names, **kwargs)
+                explainers.Partition.__init__(
+                    self,
+                    self.model,
+                    self.masker,
+                    link=self.link,
+                    feature_names=self.feature_names,
+                    output_names=self.output_names,
+                    **kwargs
+                )
             elif algorithm == "tree":
                 self.__class__ = explainers.Tree
-                explainers.Tree.__init__(self, self.model, self.masker, link=self.link, feature_names=self.feature_names, **kwargs)
+                explainers.Tree.__init__(
+                    self,
+                    self.model,
+                    self.masker,
+                    link=self.link,
+                    feature_names=self.feature_names,
+                    **kwargs
+                )
             elif algorithm == "additive":
                 self.__class__ = explainers.Additive
-                explainers.Additive.__init__(self, self.model, self.masker, link=self.link, feature_names=self.feature_names, **kwargs)
+                explainers.Additive.__init__(
+                    self,
+                    self.model,
+                    self.masker,
+                    link=self.link,
+                    feature_names=self.feature_names,
+                    **kwargs
+                )
             elif algorithm == "linear":
                 self.__class__ = explainers.Linear
-                explainers.Linear.__init__(self, self.model, self.masker, link=self.link, feature_names=self.feature_names, **kwargs)
+                explainers.Linear.__init__(
+                    self,
+                    self.model,
+                    self.masker,
+                    link=self.link,
+                    feature_names=self.feature_names,
+                    **kwargs
+                )
             else:
                 raise Exception("Unknown algorithm type passed: %s!" % algorithm)
 
-
-    def __call__(self, *args, max_evals="auto", main_effects=False, error_bounds=False, batch_size="auto",
-                 outputs=None, silent=False, **kwargs):
-        """ Explains the output of model(*args), where args is a list of parallel iteratable datasets.
+    def __call__(
+        self,
+        *args,
+        max_evals="auto",
+        main_effects=False,
+        error_bounds=False,
+        batch_size="auto",
+        outputs=None,
+        silent=False,
+        **kwargs
+    ):
+        """Explains the output of model(*args), where args is a list of parallel iteratable datasets.
 
         Note this default version could be ois an abstract method that is implemented by each algorithm-specific
         subclass of Explainer. Descriptions of each subclasses' __call__ arguments
@@ -198,7 +298,7 @@ class Explainer():
                     num_rows = len(args[i])
                 except:
                     pass
-            
+
             # convert DataFrames to numpy arrays
             if safe_isinstance(args[i], "pandas.core.frame.DataFrame"):
                 feature_names[i] = list(args[i].columns)
@@ -209,7 +309,7 @@ class Explainer():
                 args[i] = args[i]["text"]
             elif issubclass(type(args[i]), dict) and "text" in args[i]:
                 args[i] = args[i]["text"]
-        
+
         if batch_size == "auto":
             if hasattr(self.masker, "default_batch_size"):
                 batch_size = self.masker.default_batch_size
@@ -218,7 +318,7 @@ class Explainer():
 
         # loop over each sample, filling in the values array
         values = []
-        output_indices = [] 
+        output_indices = []
         expected_values = []
         mask_shapes = []
         main_effects = []
@@ -227,10 +327,18 @@ class Explainer():
         output_names = []
         if callable(getattr(self.masker, "feature_names", None)):
             feature_names = [[] for _ in range(len(args))]
-        for row_args in show_progress(zip(*args), num_rows, self.__class__.__name__+" explainer", silent):
+        for row_args in show_progress(
+            zip(*args), num_rows, self.__class__.__name__ + " explainer", silent
+        ):
             row_result = self.explain_row(
-                *row_args, max_evals=max_evals, main_effects=main_effects, error_bounds=error_bounds,
-                batch_size=batch_size, outputs=outputs, silent=silent, **kwargs
+                *row_args,
+                max_evals=max_evals,
+                main_effects=main_effects,
+                error_bounds=error_bounds,
+                batch_size=batch_size,
+                outputs=outputs,
+                silent=silent,
+                **kwargs
             )
             values.append(row_result.get("values", None))
             output_indices.append(row_result.get("output_indices", None))
@@ -240,7 +348,7 @@ class Explainer():
             clustering.append(row_result.get("clustering", None))
             hierarchical_values.append(row_result.get("hierarchical_values", None))
             output_names.append(row_result.get("output_names", None))
-            
+
             if callable(getattr(self.masker, "feature_names", None)):
                 row_feature_names = self.masker.feature_names(*row_args)
                 for i in range(len(row_args)):
@@ -252,7 +360,7 @@ class Explainer():
             pos = 0
             for j in range(len(args)):
                 mask_length = np.prod(mask_shapes[i][j])
-                arg_values[j].append(values[i][pos:pos+mask_length])
+                arg_values[j].append(values[i][pos : pos + mask_length])
                 pos += mask_length
 
         # collapse the arrays as possible
@@ -263,16 +371,23 @@ class Explainer():
         hierarchical_values = pack_values(hierarchical_values)
         clustering = pack_values(clustering)
 
-        # getting output labels 
+        # getting output labels
         if self.output_names is None:
             if None not in output_names:
                 labels = np.array(output_names)
-                sliced_labels = np.array([np.array(labels[i])[index_list] for i,index_list in enumerate(output_indices)])
+                sliced_labels = np.array(
+                    [
+                        np.array(labels[i])[index_list]
+                        for i, index_list in enumerate(output_indices)
+                    ]
+                )
             else:
                 sliced_labels = None
         else:
             labels = np.array(self.output_names)
-            sliced_labels = np.array([labels[index_list] for index_list in output_indices])
+            sliced_labels = np.array(
+                [labels[index_list] for index_list in output_indices]
+            )
 
         # build the explanation objects
         out = []
@@ -280,34 +395,50 @@ class Explainer():
 
             # reshape the attribution values using the mask_shapes
             tmp = []
-            for i,v in enumerate(arg_values[j]):
-                if np.prod(mask_shapes[i][j]) != np.prod(v.shape): # see if we have multiple outputs
+            for i, v in enumerate(arg_values[j]):
+                if np.prod(mask_shapes[i][j]) != np.prod(
+                    v.shape
+                ):  # see if we have multiple outputs
                     tmp.append(v.reshape(*mask_shapes[i][j], -1))
                 else:
                     tmp.append(v.reshape(*mask_shapes[i][j]))
             arg_values[j] = pack_values(tmp)
-            
+
             # allow the masker to transform the input data to better match the masking pattern
             # (such as breaking text into token segments)
             if hasattr(self.masker, "data_transform"):
                 data = pack_values([self.masker.data_transform(v) for v in args[j]])
             else:
                 data = args[j]
-            
+
             # build an explanation object for this input argument
-            out.append(Explanation(
-                arg_values[j], expected_values, data,
-                feature_names=feature_names[j], main_effects=main_effects,
-                clustering=clustering,
-                hierarchical_values=hierarchical_values,
-                output_names= sliced_labels # self.output_names
-                # output_shape=output_shape,
-                #lower_bounds=v_min, upper_bounds=v_max
-            ))
+            out.append(
+                Explanation(
+                    arg_values[j],
+                    expected_values,
+                    data,
+                    feature_names=feature_names[j],
+                    main_effects=main_effects,
+                    clustering=clustering,
+                    hierarchical_values=hierarchical_values,
+                    output_names=sliced_labels  # self.output_names
+                    # output_shape=output_shape,
+                    # lower_bounds=v_min, upper_bounds=v_max
+                )
+            )
         return out[0] if len(out) == 1 else out
 
-    def explain_row(self, *row_args, max_evals, main_effects, error_bounds, outputs, silent, **kwargs):
-        """ Explains a single row and returns the tuple (row_values, row_expected_values, row_mask_shapes, main_effects).
+    def explain_row(
+        self,
+        *row_args,
+        max_evals,
+        main_effects,
+        error_bounds,
+        outputs,
+        silent,
+        **kwargs
+    ):
+        """Explains a single row and returns the tuple (row_values, row_expected_values, row_mask_shapes, main_effects).
 
         This is an abstract method meant to be implemented by each subclass.
 
@@ -320,12 +451,12 @@ class Explainer():
             are fixed inputs present, like labels when explaining the loss), and row_mask_shapes is a list
             of all the input shapes (since the row_values is always flattened),
         """
-        
+
         return {}
 
     @staticmethod
     def supports_model_with_masker(model, masker):
-        """ Determines if this explainer can handle the given model.
+        """Determines if this explainer can handle the given model.
 
         This is an abstract static method meant to be implemented by each subclass.
         """
@@ -333,50 +464,50 @@ class Explainer():
 
     @staticmethod
     def _compute_main_effects(fm, expected_value, inds):
-        """ A utility method to compute the main effects from a MaskedModel.
-        """
+        """A utility method to compute the main effects from a MaskedModel."""
 
         # mask each input on in isolation
-        masks = np.zeros(2*len(inds)-1, dtype=np.int)
+        masks = np.zeros(2 * len(inds) - 1, dtype=np.int)
         last_ind = -1
         for i in range(len(inds)):
             if i > 0:
-                masks[2*i - 1] = -last_ind - 1 # turn off the last input
-            masks[2*i] = inds[i] # turn on this input
+                masks[2 * i - 1] = -last_ind - 1  # turn off the last input
+            masks[2 * i] = inds[i]  # turn on this input
             last_ind = inds[i]
 
         # compute the main effects for the given indexes
         main_effects = fm(masks) - expected_value
-        
+
         # expand the vector to the full input size
         expanded_main_effects = np.zeros(len(fm))
-        for i,ind in enumerate(inds):
+        for i, ind in enumerate(inds):
             expanded_main_effects[ind] = main_effects[i]
-        
+
         return expanded_main_effects
 
     def save(self, out_file):
-        """ Serializes the type of subclass of explainer used, this will be used during deserialization.
-        """
+        """Serializes the type of subclass of explainer used, this will be used during deserialization."""
         pickle.dump(type(self), out_file)
-    
+
     @classmethod
-    def load(cls, in_file, model_loader = None, masker_loader = None):
-        """ Deserializes the explainer subtype, and calls respective load function.
-        """
+    def load(cls, in_file, model_loader=None, masker_loader=None):
+        """Deserializes the explainer subtype, and calls respective load function."""
         explainer_type = pickle.load(in_file)
         return explainer_type._load(in_file, model_loader, masker_loader)
-        
+
+
 def pack_values(values):
-    """ Used the clean up arrays before putting them into an Explanation object.
-    """
+    """Used the clean up arrays before putting them into an Explanation object."""
 
     # collapse the values if we didn't compute them
     if values is None or values[0] is None:
         return None
 
     # convert to a single numpy matrix when the array is not ragged
-    elif np.issubdtype(type(values[0]), np.number) or len(np.unique([len(v) for v in values])) == 1:
+    elif (
+        np.issubdtype(type(values[0]), np.number)
+        or len(np.unique([len(v) for v in values])) == 1
+    ):
         return np.array(values)
     else:
         return np.array(values, dtype=np.object)
