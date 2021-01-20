@@ -68,6 +68,11 @@ class Text(Masker):
             mask = mask.copy()
             mask[:self.keep_prefix] = True
             mask[-self.keep_suffix:] = True
+
+        if type(s) is tuple:
+            for i, token in enumerate(self._segments_s):
+                if token == "<s>" or token == "</s>":
+                    mask[i] = True
         
         if self.output_type == "string":
             if self.mask_token_id is None:
@@ -143,20 +148,27 @@ class Text(Masker):
     
     def tokenize(self, s):
         if safe_isinstance(self.tokenizer, "transformers.tokenization_utils.PreTrainedTokenizer"):
-            return self.tokenizer.encode_plus(s)
+            if type(s) is tuple:
+                return self.tokenizer.encode_plus(s[0], s[1])
+            else:
+                return self.tokenizer.encode_plus(s)
         elif safe_isinstance(self.tokenizer, "transformers.tokenization_utils_fast.PreTrainedTokenizerFast"):
-            return self.tokenizer.encode_plus(s, return_offsets_mapping=True)
+            if type(s) is tuple:
+                return self.tokenizer.encode_plus(s[0], s[1], return_offsets_mapping=True)
+            else:
+                return self.tokenizer.encode_plus(s, return_offsets_mapping=True)
     
     def token_segments(self, s):
         if safe_isinstance(self.tokenizer, "transformers.tokenization_utils.PreTrainedTokenizer"):
-            token_ids = self.tokenizer.encode_plus(s)['input_ids']
+            token_ids = (self.tokenizer.encode_plus(s[0], s[1])["input_ids"] if type(s) is tuple else self.tokenizer.encode_plus(s)["input_ids"])
             tokens = self.tokenizer.convert_ids_to_tokens(token_ids)
             special_tokens_mask = self.tokenizer.get_special_tokens_mask(token_ids, already_has_special_tokens = True)
-            tokens = [tokens[i] if special_tokens_mask[i] == 0 else '' for i in range(len(special_tokens_mask))]
+            tokens = [tokens[i] if (special_tokens_mask[i] == 0 or type(s) is tuple) else "" for i in range(len(special_tokens_mask))]  # TODO: correct handling of special internal tokens
             return tokens
 
         elif safe_isinstance(self.tokenizer, "transformers.tokenization_utils_fast.PreTrainedTokenizerFast"):
-            offsets = self.tokenizer.encode_plus(s, return_offsets_mapping=True)["offset_mapping"]
+            offsets = (self.tokenizer.encode_plus(s[0], s[1], return_offsets_mapping=True)["offset_mapping"] if type(s) is tuple else self.tokenizer.encode_plus(s, return_offsets_mapping=True)["offset_mapping"])
+            # TODO: handle offsets, currently this does not use s_opt which
             offsets = [(0,0) if o is None else o for o in offsets]
             parts = [s[offsets[i][0]:max(offsets[i][1], offsets[i+1][0])] for i in range(len(offsets)-1)] 
             parts.append(s[offsets[len(offsets)-1][0]:offsets[len(offsets)-1][1]])
@@ -166,7 +178,7 @@ class Text(Masker):
         self._update_s_cache(s)
         decoded_x = [self.tokenizer.decode([v]) for v in self._tokenized_s]
         pt = partition_tree(decoded_x)
-        #self._mark_uninvertable(pt)
+        self._mark_uninvertable(pt)
         return pt
 
 
@@ -190,13 +202,13 @@ class Text(Masker):
                 ltokens = recursive_mark(lind)
                 rtokens = recursive_mark(rind)
             
-            tmp = ltokens + [self.mask_token_id]
+            tmp = ltokens + self.mask_token_id
             s2 = self.tokenizer.decode(tmp)
             e2 = self.tokenizer.encode(s2)
             if not np.all(e2[1:-1] == tmp):
                 clustering[ind-M,2] = -1 # set the distance of this cluster negative so it can't be split
             
-            tmp = [self.mask_token_id] + rtokens
+            tmp = self.mask_token_id + rtokens
             s2 = self.tokenizer.decode(tmp)
             e2 = self.tokenizer.encode(s2)
             if not np.all(e2[1:-1] == tmp):
@@ -207,7 +219,13 @@ class Text(Masker):
         recursive_mark(M+len(clustering)-1)
 
     def _update_s_cache(self, s):
-        if self._s != s:
+        if type(s) is tuple and (self._s != s[0] or self._s_opt != s[1]):
+            self._s = s[0]
+            self.s_opt = s[1]
+            self._tokenized_s_full = self.tokenize(s)
+            self._tokenized_s = np.array(self._tokenized_s_full.data["input_ids"])
+            self._segments_s = np.array(self.token_segments(s))
+        elif self._s != s:
             self._s = s
             self._tokenized_s_full = self.tokenize(s)
             self._tokenized_s = np.array(self._tokenized_s_full.data["input_ids"])
@@ -229,6 +247,9 @@ class Text(Masker):
             invariants[:self.keep_prefix] = True
         if self.keep_suffix > 0:
             invariants[-self.keep_suffix:] = True
+        for i, segment in enumerate(self._segments_s):  # TODO: How should special characters be handled in invariants?
+            if segment == "</s>":
+                invariants[i] = True
 
         return invariants.reshape(1,-1)
 
@@ -303,6 +324,7 @@ class TokenGroup():
         return len(self.g)
 
 def merge_score(group1, group2):
+    separators = ["<s>", "</s>"]
     score = 0
 
     # merge broken-up parts of words first
@@ -350,6 +372,9 @@ def merge_score(group1, group2):
             score -= 20
         else:
             score -= 1
+
+    if group1[-1].s in separators and group2[0].s in separators:
+        score -= 10000000000
     
     score -= len(group1) + len(group2)
     #print(group1, group2, score)

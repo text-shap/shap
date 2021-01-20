@@ -194,7 +194,20 @@ class MaskedModel():
 
         return averaged_outs
     
+    def _split_multi_input(self, *inputs):
+        out = []
+        for inp in inputs:
+            for arr in inp:
+                clean = list(filter(None, re.split("<s>|</s>", arr[0])))
+                clean = [re.sub(r"[\s]+", " ", each).strip() for each in clean]
+                out.append(np.array(clean).reshape(-1, 2))
+        cat = np.concatenate(out)
+        return [cat]
+
     def _stack_inputs(self, *inputs):
+        if type(self.args[0]) is tuple:
+            combined = self._split_multi_input(*inputs)
+            return combined
         return tuple([np.concatenate(v) for v in inputs])
 
     @property
