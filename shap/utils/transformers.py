@@ -73,8 +73,6 @@ MODELS_FOR_MASKED_LM = [
     "transformers.TFFunnelForMaskedLM",
 ]
 
-MODELS_FOR_SEQ_CLASSIFICATION = ["transformers.BartForSequenceClassification"]
-
 SENTENCEPIECE_TOKENIZERS = [
     "transformers.MarianTokenizer",
     "transformers.T5Tokenizer",

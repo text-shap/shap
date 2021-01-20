@@ -1,11 +1,7 @@
 from .. import maskers
 from .. import links
 from ..utils import safe_isinstance, show_progress
-from ..utils.transformers import (
-    MODELS_FOR_CAUSAL_LM,
-    MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM,
-    MODELS_FOR_SEQ_CLASSIFICATION,
-)
+from ..utils.transformers import MODELS_FOR_CAUSAL_LM, MODELS_FOR_SEQ_TO_SEQ_CAUSAL_LM
 from .. import models
 from ..models import Model
 from .._explanation import Explanation

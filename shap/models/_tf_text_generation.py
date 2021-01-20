@@ -39,15 +39,13 @@ class TFTextGeneration(Model):
         else:
             self.model_agnostic = True
 
-    def __call__(self, X, X_opt=None):
+    def __call__(self, X):
         """Generates target sentence ids from X.
 
         Parameters
         ----------
         X: str or numpy.array
             Input in the form of text or image.
-
-        X_opt: Optional input for multi-modal models
 
         Returns
         -------
@@ -56,7 +54,7 @@ class TFTextGeneration(Model):
         """
         target_sentence_ids = None
         if self.model_agnostic:
-            target_sentence = self.model(X)  # TODO: does not handle X_opt
+            target_sentence = self.model(X)
             parsed_tokenizer_dict = parse_prefix_suffix_for_tokenizer(
                 self.similarity_tokenizer
             )
@@ -73,7 +71,7 @@ class TFTextGeneration(Model):
                     [self.similarity_tokenizer.encode(target_sentence)]
                 )[:, keep_prefix:]
         else:
-            input_ids = tf.convert_to_tensor([self.tokenizer.encode(X, X_opt)])
+            input_ids = tf.convert_to_tensor([self.tokenizer.encode(X)])
             text_generation_params = {}
             # check if user assigned any text generation specific kwargs
             if "text_generation_params" in self.model.config.__dict__:

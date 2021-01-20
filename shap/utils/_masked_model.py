@@ -233,7 +233,7 @@ class MaskedModel:
         return [cat]
 
     def _stack_inputs(self, *inputs):
-        if type(self.args) is tuple:
+        if type(self.args[0]) is tuple:
             combined = self._split_multi_input(*inputs)
             return combined
         return tuple([np.concatenate(v) for v in inputs])

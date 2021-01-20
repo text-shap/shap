@@ -43,16 +43,13 @@ class PTTextGeneration(Model):
         else:
             self.model_agnostic = True
 
-    def __call__(self, X, X_opt=None):
+    def __call__(self, X):
         """Generates target sentence ids from X.
 
         Parameters
         ----------
         X: str or numpy.array
             Input in the form of text or image.
-
-        X_opt: Optional input for multi-modal models
-
         Returns
         -------
         tensor
@@ -60,7 +57,7 @@ class PTTextGeneration(Model):
         """
         target_sentence_ids = None
         if self.model_agnostic:
-            target_sentence = self.model(X)  # TODO: does not handle X_opt
+            target_sentence = self.model(X)
             parsed_tokenizer_dict = parse_prefix_suffix_for_tokenizer(
                 self.similarity_tokenizer
             )
@@ -80,7 +77,7 @@ class PTTextGeneration(Model):
             self.model.eval()
             # in non model agnostic case, the model is assumed to be a transformer model and hence we move to_device
             self.model = self.to_device(self.model)
-            input_ids = torch.tensor([self.tokenizer.encode(X, X_opt)])
+            input_ids = torch.tensor([self.tokenizer.encode(X)])
             input_ids = self.to_device(input_ids)
             text_generation_params = {}
             # check if user assigned any text generation specific kwargs

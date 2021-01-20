@@ -73,7 +73,7 @@ class PTTeacherForcingLogits(TeacherForcingLogits):
         else:
             self.model = model.to(self.device)
 
-    def get_output_names_and_update_target_sentence_ids(self, X, X_opt=None):
+    def get_output_names_and_update_target_sentence_ids(self, X):
         """Gets the output tokens from input(X) by computing the
             target sentence ids using the using the generation_function_for_target_sentence_ids()
             and next getting output names using the similarity_tokenizer.
@@ -82,15 +82,13 @@ class PTTeacherForcingLogits(TeacherForcingLogits):
         ----------
         X: string or numpy array
             Input(Text/Image) for an explanation row.
-        X_opt: optional string or numpy.array
-            Input(Text/Image) for an explanation row.
         Returns
         -------
         list
             A list of output tokens.
         """
         self.target_sentence_ids = (
-            self.generation_function_for_target_sentence_ids(X, X_opt)
+            self.generation_function_for_target_sentence_ids(X)
             .to(self.device)
             .to(torch.int64)
         )
@@ -100,15 +98,13 @@ class PTTeacherForcingLogits(TeacherForcingLogits):
         ]
         return output_names
 
-    def get_source_sentence_ids(self, X, X_opt=None):
+    def get_source_sentence_ids(self, X):
         """The function tokenizes source sentence.
 
         Parameters
         ----------
         X: string or tensor
             X could be a text or image.
-        X_opt: optional string or numpy.array
-            Input(Text/Image) for an explanation row.
         Returns
         -------
         tensor
@@ -117,15 +113,13 @@ class PTTeacherForcingLogits(TeacherForcingLogits):
         # TODO: batch source_sentence_ids
         if self.model_agnostic:
             # In model agnostic case, we first pass the input through the model and then tokenize output sentence
-            source_sentence = self.model(X)  # TODO: Does not handle X_opt
+            source_sentence = self.model(X)
             source_sentence_ids = torch.tensor(
                 [self.similarity_tokenizer.encode(source_sentence)]
             )
         else:
             # TODO: check if X is text/image cause presently only when X=text is supported to use model decoder
-            source_sentence_ids = torch.tensor(
-                [self.similarity_tokenizer.encode(X, X_opt)]
-            )
+            source_sentence_ids = torch.tensor([self.similarity_tokenizer.encode(X)])
         source_sentence_ids = source_sentence_ids.to(self.device).to(torch.int64)
         return source_sentence_ids
 

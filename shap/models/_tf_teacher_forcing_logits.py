@@ -60,15 +60,13 @@ class TFTeacherForcingLogits(TeacherForcingLogits):
             device,
         )
 
-    def get_source_sentence_ids(self, X, X_opt=None):
+    def get_source_sentence_ids(self, X):
         """The function tokenizes source sentence.
 
         Parameters
         ----------
         X: string or numpy.array
             X could be a text or image.
-        X_opt: optional string or numpy.array
-            Input(Text/Image) for an explanation row.
         Returns
         -------
         tf.Tensor
@@ -77,14 +75,14 @@ class TFTeacherForcingLogits(TeacherForcingLogits):
         # TODO: batch source_sentence_ids
         if self.model_agnostic:
             # In model agnostic case, we first pass the input through the model and then tokenize output sentence
-            source_sentence = self.model(X)  # TODO: does not handle X_opt
+            source_sentence = self.model(X)
             source_sentence_ids = tf.convert_to_tensor(
                 [self.similarity_tokenizer.encode(source_sentence)]
             )
         else:
             # TODO: check if X is text/image cause presently only when X=text is supported to use model decoder
             source_sentence_ids = tf.convert_to_tensor(
-                [self.similarity_tokenizer.encode(X, X_opt)]
+                [self.similarity_tokenizer.encode(X)]
             )
         return source_sentence_ids
 
