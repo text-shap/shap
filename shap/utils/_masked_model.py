@@ -1,6 +1,7 @@
 import numpy as np
 import scipy.sparse
 from numba import jit
+import re
 
 
 class MaskedModel():

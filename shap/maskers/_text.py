@@ -59,6 +59,7 @@ class Text(Masker):
         self.default_batch_size = 5
 
         self._s = None
+        self._s_opt = None
     
     def __call__(self, mask, s):
         self._update_s_cache(s)

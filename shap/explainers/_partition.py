@@ -178,6 +178,13 @@ class Partition(Explainer):
             lower_credit(li, self.values[i] * lsize / group_size)
             lower_credit(ri, self.values[i] * rsize / group_size)
         lower_credit(len(self.dvalues) - 1)
+
+        def fix_negative_clustering():
+            minimum = self._clustering.min()
+            if minimum < 0:
+                self._clustering += abs(minimum)
+
+        fix_negative_clustering()
             
         return {
             "values": self.values[:M].copy(),
